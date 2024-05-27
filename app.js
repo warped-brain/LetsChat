@@ -22,7 +22,7 @@ const DETECT_SENTIMENT_LANGUAGES = [
     'en', 'es', 'fr', 'de', 'it', 'pt',
     'ar', 'hi', 'ja', 'ko', 'zh', 'zh-TW'
 ];
-const REJECT_MESSAGE = 'Please find a better way to express this.';
+const REJECT_MESSAGE = 'Express the message in a positive manner.';
 const DEFAULT_LANGUAGE = 'en';
 
 const CONNECTIONS_TABLE = process.env.CONNECTIONS_TABLE;
@@ -198,7 +198,7 @@ async function sendMessagesToConnection(agma, connectionId, messages) {
 async function rejectMessage(agma, connectionId, message) {
     console.log('rejectMessage', connectionId, message);
     const originalLang = message.lang; 
-    message.user = 'Positive Chat';
+    message.user = 'Negative Sentiment Detected:';
     message.lang = DEFAULT_LANGUAGE; 
     message.content = REJECT_MESSAGE;
     await translateMessage(message, originalLang); 
