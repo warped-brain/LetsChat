@@ -64,7 +64,7 @@ function setupChooseLanguage() {
 
     const langLabel = document.createElement('label');
     langLabel.htmlFor = 'lang-select';
-    langLabel.textContent = '   Translate to:';
+    langLabel.textContent = 'Translate to:';
 
     langSection.appendChild(langLabel);
     langSection.appendChild(langSelect);
@@ -187,12 +187,13 @@ function appendMessage(m) {
         messageDiv.appendChild(topicsSpan);
     }
 
-    let contentP = document.createElement('br');
+    let contentP = document.createElement('p');
     contentP.textContent = '[' + m.lang + '] ' + removeTags(m.content);
+    console.log(removeTags(m.content));
     messageDiv.appendChild(contentP);
 
     if ('translated' in m) {
-        let translatedP = document.createElement('br');
+        let translatedP = document.createElement('p');
         translatedP.textContent = '[' + m.destLang + '] ' + m.translated;
         messageDiv.appendChild(translatedP);
     }
