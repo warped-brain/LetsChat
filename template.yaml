@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: A chat without negative content.
+Resources:
+
+  LetsChatWebSocket:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: LetsChatWebSocket
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref LetsChatWebSocket
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref ConnectInteg
+
+  ConnectInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref LetsChatWebSocket
+      Description: Connect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LetsChatFunction.Arn}/invocations
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref LetsChatWebSocket
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref DisconnectInteg
+
+  DisconnectInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref LetsChatWebSocket
+      Description: Disconnect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LetsChatFunction.Arn}/invocations
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref LetsChatWebSocket
+      RouteKey: "$default"
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref DefaultInteg
+
+  DefaultInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref LetsChatWebSocket
+      Description: Default Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LetsChatFunction.Arn}/invocations
+
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+    - ConnectRoute
+    - DefaultRoute
+    - DisconnectRoute
+    Properties:
+      ApiId: !Ref LetsChatWebSocket
+
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: Prod
+      Description: Prod Stage
+      DeploymentId: !Ref Deployment
+      ApiId: !Ref LetsChatWebSocket
+
+  LetsChatPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - LetsChatWebSocket
+      - LetsChatFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LetsChatFunction
+      Principal: apigateway.amazonaws.com
+
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions:
+        - AttributeName: 'connectionId'
+          AttributeType: 'S'
+        - AttributeName: 'room'
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: 'connectionId'
+          KeyType: 'HASH'
+      GlobalSecondaryIndexes:
+        - IndexName: 'roomIndex'
+          KeySchema:
+            - AttributeName: 'room'
+              KeyType: 'HASH'
+          Projection:
+            ProjectionType: ALL
+
+  ConversationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions:
+        - AttributeName: 'room'
+          AttributeType: 'S'
+        - AttributeName: 'timestamp'
+          AttributeType: 'N'
+      KeySchema:
+        - AttributeName: 'room'
+          KeyType: 'HASH'
+        - AttributeName: 'timestamp'
+          KeyType: 'RANGE'
+
+  TopicsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions:
+        - AttributeName: 'room'
+          AttributeType: 'S'
+        - AttributeName: 'topic'
+          AttributeType: 'S'
+        - AttributeName: 'num'
+          AttributeType: 'N'
+      KeySchema:
+        - AttributeName: 'room'
+          KeyType: 'HASH'
+        - AttributeName: 'topic'
+          KeyType: 'RANGE'
+      GlobalSecondaryIndexes:
+        - IndexName: 'numIndex'
+          KeySchema:
+            - AttributeName: 'room'
+              KeyType: 'HASH'
+            - AttributeName: 'num'
+              KeyType: 'RANGE'
+          Projection:
+            ProjectionType: ALL
+
+  LetsChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lets-chat/
+      Handler: app.lambdaHandler
+      Runtime: nodejs20.x
+      Timeout: 30
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - 'execute-api:ManageConnections'
+            Resource:
+              - 'arn:aws:execute-api:*:*:*/@connections/*'
+          - Effect: Allow
+            Action:
+              - 'dynamoDb:PutItem'
+              - 'dynamoDb:GetItem'
+              - 'dynamoDb:DeleteItem'
+            Resource:
+              - !GetAtt ConnectionsTable.Arn
+          - Effect: Allow
+            Action:
+              - 'dynamoDb:Query'
+            Resource:
+              - !Sub "${ConnectionsTable.Arn}/index/roomIndex"
+          - Effect: Allow
+            Action:
+              - 'dynamoDb:PutItem'
+              - 'dynamoDb:Query'
+            Resource:
+              - !GetAtt ConversationsTable.Arn
+          - Effect: Allow
+            Action:
+              - 'dynamoDb:UpdateItem'
+            Resource:
+              - !GetAtt TopicsTable.Arn
+          - Effect: Allow
+            Action:
+              - 'dynamoDb:Query'
+            Resource:
+              - !Sub "${TopicsTable.Arn}/index/numIndex"
+          - Effect: Allow
+            Action:
+              - 'comprehend:DetectDominantLanguage'
+              - 'comprehend:DetectSentiment'
+              - 'comprehend:DetectEntities'
+              - 'translate:TranslateText'
+            Resource: '*'
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          CONVERSATIONS_TABLE: !Ref ConversationsTable
+          TOPICS_TABLE: !Ref TopicsTable
+
+Outputs:
+  LetsChatFunction:
+    Description: "Lets Chat Lambda Function ARN"
+    Value: !GetAtt LetsChatFunction.Arn
+  LetsChatFunctionIamRole:
+    Description: "Implicit IAM Role created for Lets Chat function"
+    Value: !GetAtt LetsChatFunctionRole.Arn
+  WebSocketURI:
+    Description: "The WSS Protocol URI to connect to"
+    Value: !Sub "wss://${LetsChatWebSocket}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
